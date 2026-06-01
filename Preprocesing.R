@@ -1,4 +1,4 @@
-setwd("C:/Users/College/Desktop/Dissertation/Restart/Predictive_Model")
+setwd("...")
 
 
 getwd()
@@ -11,8 +11,6 @@ library(HGNChelper)
 library(oligo)
 library(stringr)
 library(affy)
-BiocManager::install("lumi")
-BiocManager::install("lumiHumanIDMapping")
 library(lumi)
 library(lumiHumanIDMapping)
 
@@ -22,7 +20,7 @@ library(lumiHumanIDMapping)
 # LIST .CEL FILES
 cels.gse18312<-list.celfiles("RAW/", pattern="CEL")
 
-cel_path <- "C:/Users/College/Desktop/Dissertation/Restart/18312/RAW"  
+cel_path <- "..."  
 
 cel_files <- list.files(
   path = cel_path,
@@ -38,7 +36,7 @@ GSE18312.rma <- oligo::rma(RAW18312)
 RAW.GSE18312.DF = as.data.frame(exprs(GSE18312.rma))
 
 #Load phenodata file
-my_data_18312 <- read.csv("C:/Users/College/Desktop/Dissertation/Restart/18312/18312_Ph_data.csv")
+my_data_18312 <- read.csv("...")
 
 # Editing column names of the raw expression matrix df
 
@@ -65,7 +63,7 @@ Ann.GSE18312.DF=Ann.GSE18312.DF[,c(1,2,8)]
 # Remove rows with unassigned ProbeIDs
 
 Ann.GSE18312.omit=na.omit(Ann.GSE18312.DF)
-dim(Ann.GSE18312.omit)#17638
+dim(Ann.GSE18312.omit)#
 table(is.na(Ann.GSE18312.omit$geneassignment))
 
 
@@ -123,13 +121,7 @@ saveRDS(GSE18312.avereps.final, file = "18312_normalized.rds")
 cels.gse27383<-list.celfiles("RAW/", pattern="CEL")
 
 #/ READING RAW DATA
-
-#RAW<-read.celfiles(list.files(pattern = '*CEL', full.names = TRUE))
-#or
-#RAW <- oligo::read.celfiles(cels.gse27383)
-      # or oligo, depending on your platform
-
-cel_path <- "C:/Users/College/Desktop/Dissertation/Restart/27383/RAW"  
+cel_path <- "..."  
 
 cel_files <- list.files(
   path = cel_path,
@@ -141,21 +133,17 @@ RAW_27383 <- read.celfiles(cel_files)
 
 
 #/ FETCHING PHENOTYPE DATA
-
-##{ph.data<-read.table("", header = TRUE, sep = "\t", nrows = 21)}
-#or
-data_27383 <- read.csv("C:/Users/College/Desktop/Dissertation/Restart/27383/27383_Ph_Data.csv", header = TRUE, stringsAsFactors = FALSE)
+data_27383 <- read.csv("...", header = TRUE, stringsAsFactors = FALSE)
 
 
 #/ PERFORM RMA
-#GSE27383.rma= rma(RAW, target="core")
 GSE27383.rma <- oligo::rma(RAW_27383)
 
 #/ RAW EXPRESSION MATRIX AS DATA FRAME
 RAW.GSE27383.DF = as.data.frame(exprs(GSE27383.rma))
 
 ##Load phenodata file
-my_data_27383 <- read.csv("C:/Users/College/Desktop/Dissertation/Restart/27383/27383_Ph_Data.csv")
+my_data_27383 <- read.csv("...")
 
 # Editing column names of the raw expression matrix df
 colnames(RAW.GSE27383.DF)=my_data_27383$Accession
@@ -164,19 +152,7 @@ colnames(RAW.GSE27383.DF)
 
 
 #/ GENE ANNOTATION (Finished till here)
-
-#featureData(GSE27383.rma) = getNetAffx(GSE27383.rma, "transcript")
-#instead of this alternate code was used
-##annotation <- AnnotationDbi::select(
-#hgu133plus2.db,
-#keys = rownames(expr),
-#columns = c("SYMBOL", "GENENAME", "ENTREZID"),
-#keytype = "PROBEID"
-#)
-
 GSE27383.rma.df<- as.data.frame(exprs(GSE27383.rma))
-
-
 Martfunction=useMart("ENSEMBL_MART_ENSEMBL")
 Martfunction=useDataset("hsapiens_gene_ensembl",Martfunction)
 GSE27383.pIDs=rownames(GSE27383.rma.df)
@@ -190,8 +166,7 @@ GS.pIDs.27383= getBM(attributes = c("affy_hg_u133_plus_2", "hgnc_symbol"),
 
 colnames(GSE27383.rma.df)=my_data_27383$Accession
 colnames(GSE27383.rma.df)
-
-
+\
 #/ REMOVE UNASSIGNED PROBE-IDS
 
 GS.pIDs.27383.df=GS.pIDs.27383[!(GS.pIDs.27383$hgnc_symbol==""),]
@@ -199,7 +174,6 @@ GS.pIDs.27383.df=GS.pIDs.27383[!(GS.pIDs.27383$hgnc_symbol==""),]
 #/ VERIFY GENE SYMBOLS WITH HGNC
 
 geneSymbols.verified<-checkGeneSymbols(GS.pIDs.27383.df$hgnc_symbol, species = "human")
-
 
 # Exchange the columns with corrected values (from verified to unverified gene symbol df)
 
@@ -249,12 +223,12 @@ saveRDS(abc, file = "27383_normalized.rds")
 
 #/ LISTING FILES IN THE DIRECTORY
 
-txt.gse38481<-list.files("C:/Users/College/Desktop/Dissertation/Restart/38481/GSE38481/", pattern="txt")
+txt.gse38481<-list.files("...", pattern="txt")
 
 
 #/ READING RAW DATA
 
-RAW.DATA.GSE38481 <- lumiR("C:/Users/College/Desktop/Dissertation/Restart/38481/GSE38481_non_normalised.txt", convertNuID = TRUE, lib.mapping = 'lumiHumanIDMapping', QC = TRUE,  dec = '.', parseColumnName = TRUE, columnNameGrepPattern = list(exprs='AVG_SIGNAL', se.exprs='NA', detection='DETECTION'))
+RAW.DATA.GSE38481 <- lumiR("...", convertNuID = TRUE, lib.mapping = 'lumiHumanIDMapping', QC = TRUE,  dec = '.', parseColumnName = TRUE, columnNameGrepPattern = list(exprs='AVG_SIGNAL', se.exprs='NA', detection='DETECTION'))
 dim(RAW.DATA.GSE38481)
 #24526
 
@@ -270,7 +244,7 @@ dim(GSE38481.RAW) #16023
 
 ## FETCHING PHENOTYPE DATA
 
-phData_38481<- read.csv("C:/Users/College/Desktop/Dissertation/Restart/38481/38481_Ph_data.csv", header = TRUE, stringsAsFactors = FALSE)
+phData_38481<- read.csv("...", header = TRUE, stringsAsFactors = FALSE)
 
 colnames(GSE38481.RAW)= phData_38481$X.Sample_geo_accession
 colnames(GSE38481.RAW)
@@ -293,33 +267,6 @@ dim(BCOR.GSE38481)
 
 BCOR.GSE38481.matrix= exprs(BCOR.GSE38481)
 dim(BCOR.GSE38481.matrix)
-
-
-# Normalization
-#library(lumi)
-##file.lumi = lumiR(BCOR.GSE38481.matrix)
-##lumiExpr = lumiExpresso(file.lumi, bg.correct = TRUE, normalise = TRUE, verbose = TRUE)
-##exprs <- exprs(lumiExpr)
-##pvalue <- detection(lumiExpr)
-
-# 1. Convert your matrix to a LumiBatch object
-# Replace 'your_matrix' with the name of your variable (e.g., BCOR.GSE38481.matrix)
-#lumi_batch <- new("LumiBatch", exprs = BCOR.GSE38481.matrix)
-
-# 2. Log2 Transformation
-# This ensures data is normally distributed
-#lumi_log2 <- lumiT(lumi_batch, method = "log2")
-
-# 3. Quantile Normalization
-# This makes the distribution of all samples identical
-#lumi_norm <- lumiN(lumi_log2, method = "quantile")
-
-# 4. Extract the final normalized matrix
-#final_matrix <- exprs(BCOR.GSE38481.matrix.2)
-
-
-
-
 
 # Check for negative values and replace them with zero
 
@@ -388,10 +335,10 @@ saveRDS(GSE38481.avreps.final, file = "38481_normalized.rds")
 
 #/ LISTING FILES IN THE DIRECTORY
 
-txt.gse38484<-list.files("C:/Users/College/Desktop/DIssertation/Restart/38484/GSE38484/", pattern="txt")
+txt.gse38484<-list.files("...", pattern="txt")
 
 #/ READING RAW DATA
-RAW.DATA.GSE38484 <- lumiR("C:/Users/College/Desktop/DIssertation/Restart/38484/GSE38484_non_normalized.txt", convertNuID = TRUE, 
+RAW.DATA.GSE38484 <- lumiR("...", convertNuID = TRUE, 
                            lib.mapping = 'lumiHumanIDMapping', QC = TRUE,  dec = '.', parseColumnName = TRUE,
                            columnNameGrepPattern = list(exprs='AVG_SIGNAL', se.exprs='NA', detection='DETECTION'))
 dim(RAW.DATA.GSE38484)#48742
@@ -407,7 +354,7 @@ dim(GSE38484.RAW) #38975
 
 #/ FETCHING PHENOTYPE DATA
 
-phData_38484<- read.csv("C:/Users/College/Desktop/DIssertation/Restart/38484/38484_Phenodata.csv")
+phData_38484<- read.csv("...")
 
 colnames(GSE38484.RAW)= phData_38484$Geo_accession
 colnames(GSE38484.RAW)
@@ -486,7 +433,7 @@ saveRDS(GSE38484.avreps.final, file = "38484_normalized.rds")
 #48072
 
 #/ READING RAW DATA
-RAW.GSE48072 <- lumiR("C:/Users/College/Desktop/Dissertation/Restart/48072/Rawdata.txt", convertNuID = TRUE, 
+RAW.GSE48072 <- lumiR("...", convertNuID = TRUE, 
                       lib.mapping = 'lumiHumanIDMapping', QC = TRUE,  dec = '.', parseColumnName = TRUE,
                       columnNameGrepPattern = list(exprs='SAMPLE', se.exprs='NA', detection='Detection'))
 
@@ -504,7 +451,7 @@ dim(GSE48072.RAW)# 30355
 y=as.data.frame(GSE48072.RAW)
 
 #/ FETCHING PHENOTYPE DATA
-phData<- read.csv("C:/Users/College/Desktop/Dissertation/Restart/48072/48072_Phenodata.csv")
+phData<- read.csv("...")
 
 colnames(GSE48072.RAW)=phData$Geo_accession
 colnames(GSE48072.RAW)
@@ -532,18 +479,6 @@ expr <- normalizeBetweenArrays(expr, method = "quantile")
 # Final check
 sum(is.na(expr))
 sum(is.infinite(expr))
-
-
-
-##BCOR.GSE48072 <- lumiN(lumiT(lumiB(
-#  GSE48072.RAW,method="bgAdjust"),method="log2"),method="quantile")
-#dim(BCOR.GSE48072)
-
-
-#expr <- exprs(GSE48072.RAW)
-#expr <- log2(expr + 1)
-#expr.qn <- normalizeBetweenArrays(expr, method = "quantile")
-
 
 # Extracting background corrected matrix
 
@@ -604,14 +539,14 @@ saveRDS(GSE48072.avreps.final, file = "48072_normalized.rds")
 
 
 #/ LISTING FILES
-TXT.GSE54913<-list.files("C:/Users/College/Desktop/Dissertation/Restart/54913/GSE54913/", pattern="txt", full.names = TRUE)
+TXT.GSE54913<-list.files("...", pattern="txt", full.names = TRUE)
 
 #/ READING RAW DATA
 
-GSE54913 <- read.delim("C:/Users/College/Desktop/Dissertation/Restart/54913/GSE54913_mRNA_raw_for_GEO.txt", header = TRUE, sep ="\t")
+GSE54913 <- read.delim("...", header = TRUE, sep ="\t")
 
 
-phData<- read.csv("C:/Users/College/Desktop/Dissertation/Restart/54913/54913_Ph_data.csv")
+phData<- read.csv("...")
 
 #/ MODIFYING THE RAW DATA TABLE
 GSE54913.mod1= GSE54913[,c(1,3)]
@@ -646,7 +581,7 @@ GSE54913.HGNC= merge(GSE54913.mod2, GSE54913.mod1.df1, by="ProbeName")
 GSE54913.HGNC <- GSE54913.HGNC %>% relocate(Suggested.Symbol, .before = NC72)
 
 
-GSE54913 <- read.delim("C:/Users/College/Documents/GSE54913_mRNA_raw_for_GEO.txt", header = TRUE, sep ="\t")
+GSE54913 <- read.delim("...", header = TRUE, sep ="\t")
 
 
 # Remove Probe Names
@@ -669,7 +604,6 @@ expr <- normalizeBetweenArrays(expr, method = "quantile")
 GSE54913.FINAL.BC=expr
 
 GSE54913.GS= cbind(GSE54913.FINAL.BC, GSE54913.FINAL[,1])
-#GSE54913.GS <- GSE54913.GS %>% relocate(V31, .before = NC72)
 GSE54913.GS.df=as.data.frame(GSE54913.GS)
 GSE54913.GS.df <- GSE54913.GS.df %>% relocate(V31, .before = NC72)
 colnames(GSE54913.GS.df)[colnames(GSE54913.GS.df) == "V31"] <- "Suggested.Symbol"
@@ -693,10 +627,6 @@ dim(GSE54913.avereps.df)# 13023 30
 
 class(GSE54913.avereps.df)
 
-#is.numeric(GSE54913.avreps.final)
-#GSE54913.avreps.final[]= lapply(GSE54913.avreps.df, function(x) as.numeric(as.character(x)))
-
-
 df_num <- GSE54913.avereps.df
 df_num[] <- lapply(df_num, function(x) as.numeric(as.character(x)))
 
@@ -705,7 +635,7 @@ saveRDS(df_num, file="54913_normalized.rds")
 
 # Kum
 
-Kum_WN <- readRDS("C:/Users/College/Desktop/Dissertation/Restart/Kum/Kum_WN.rds")
+Kum_WN <- readRDS("...")
 
 class(Kum_WN)
 
