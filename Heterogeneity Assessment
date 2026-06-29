@@ -1,1 +1,507 @@
+setwd(".......")
+
+library(tidyverse)
+library(ggplot2)
+library(ggfortify)
+library(limma)
+library(sva)
+library(EnhancedVolcano)
+library(metafor)
+library(tidyr)
+library(dplyr)
+library(openxlsx)
+
+
+
+#use preprocessed and quantile normalized datasets
+# Read datasets
+X18312 <- readRDS("18312_normalized.rds")
+X38481 <- readRDS("38481_normalized.rds")
+X38484 <- readRDS("38484_normalized.rds")
+X48072 <- readRDS("48072_normalized.rds")
+X54913 <- readRDS("54913_normalized.rds")
+XKum <- readRDS("Kum_normalized.rds")
+XKum <- as.data.frame(XKum)
+X27383<-readRDS("27383_normalized.rds")
+
+
+#name first coloumns of all datasets as genes
+#colnames(X18312)[1] <- "Genes"
+#colnames(X38481)[1] <- "Genes"
+#colnames(X38484)[1] <- "Genes"
+#colnames(X48072)[1] <- "Genes"
+#colnames(X54913)[1] <- "Genes"
+#colnames(XKum)[1] <- "Genes"
+#colnames(X27383)[1] <- "Genes"
+
+
+X18312 <- data.frame(Genes = rownames(X18312), X18312, row.names = NULL)
+X38481 <- data.frame(Genes = rownames(X38481), X38481, row.names = NULL)
+X38484 <- data.frame(Genes = rownames(X38484), X38484, row.names = NULL)
+X48072 <- data.frame(Genes = rownames(X48072), X48072, row.names = NULL)
+X54913 <- data.frame(Genes = rownames(X54913), X54913, row.names = NULL)
+XKum   <- data.frame(Genes = rownames(XKum),   XKum,   row.names = NULL)
+X27383 <- data.frame(Genes = rownames(X27383), X27383, row.names = NULL)
+
+#merge datasets based on common genes
+datasetlist=list(X18312, X38481, X38484, X48072, X54913, XKum, X27383)
+metafile<-datasetlist %>% purrr::reduce(inner_join,by='Genes')
+dim(metafile) #6733 429
+
+#loading pheotype data
+phenodata=read.csv("merged_pheno_data.csv",header=TRUE)
+dim(phenodata) #428 3
+
+#################################
+rownames(phenodata) <- phenodata$GSM_ID
+
+meta_samples <- colnames(metafile)[-1]  # drop "Genes"
+pheno_samples <- rownames(phenodata)
+setdiff(meta_samples, pheno_samples)
+setdiff(pheno_samples, meta_samples)
+identical(meta_samples, pheno_samples)
+phenodata <- phenodata[meta_samples, ]
+stopifnot(identical(colnames(metafile)[-1], rownames(phenodata)))
+length(meta_samples)     # should be 428
+nrow(phenodata)          # should be 428
+
+head(meta_samples)
+head(rownames(phenodata))
+
+################################################
+
+#here my phenodata has 3 columns - Batch (contains dataset_id e.g: GSE18312, GSE27383 etc), GSE_id (contains sample ids or GSM ids) and Pheno_data(SCZ/CNT)
+
+#####Batch correction##########
+
+#model matriX with batches of pheno data
+modphenoBC <- model.matrix(~ 1, data = phenodata)
+
+#phenodata <- phenodata %>%
+phenodata$Batch <- as.factor(phenodata$GSE_ID)
+
+#phenodata$Batch <- as.factor(phenodata$Batch)
+phenoBatch=phenodata$Batch
+
+#convert gene symbols to rownames to form uniform matriX of metafile
+metafile=column_to_rownames(metafile,var='Genes')
+metafile.numeric=mutate_all(metafile, as.numeric)
+
+#batch correction
+
+metabc1=ComBat(dat=metafile.numeric,batch=phenoBatch,mod=modphenoBC)
+dim(metabc1)
+
+#PCA plot for before and after batch correction
+
+pca_before<-prcomp(t(metafile.numeric))
+
+# Convert Batch to categorical
+new2<- autoplot(pca_before, data=phenodata, colour= "Batch" 
+                ,main="Before batch correction", scale. = TRUE)+ theme_bw()
+print(new2)
+
+#PCA plot after batch effects removal
+pca_after<-prcomp(t(metabc1))
+new<- autoplot(pca_after, data=phenodata, colour= "Batch" 
+               ,main="After batch correction", scale. = TRUE)+ theme_bw()
+
+print(new)
+
+#Differential Expression of Genes
+#to make sure the order of common genes matches in all files
+#DGE after batch correction
+f.source=factor(phenodata$Diagnosis, levels=c("Control","Schizophrenia"))
+design_metafile <- model.matrix(~0+factor(f.source))
+colnames(design_metafile)<-c("Control","Schizophrenia")
+fit_metafile=lmFit(metabc1,design_metafile)
+
+contrast.matrix<-makeContrasts(Schizophrenia-Control, levels=design_metafile)
+fit2<-contrasts.fit(fit_metafile,contrast.matrix)
+fit2<-eBayes(fit2)
+
+info.tab=topTable(fit2, number=Inf,adjust.method="BH", confint=0.95)
+topgenes=info.tab[info.tab[,"adj.P.Val"]<0.05,]
+
+write.csv(topgenes, "DGE.csv")
+
+EnhancedVolcano(
+  info.tab,
+  lab = rownames(info.tab),
+  x = "logFC",
+  y = "P.Value",
+  pCutoff = 0.05,
+  FCcutoff = 0.3
+)
+
+
+#or
+EnhancedVolcano(
+  info.tab,
+  lab = rownames(info.tab),
+  x = "logFC",
+  y = "adj.P.Val",
+  pCutoff = 0.05,
+  FCcutoff = 0.3
+)
+
+########unmereg metafile such that each metafile has 
+
+#unmerging datasets
+metabc1.df=as.data.frame(t(metabc1))
+phenodata.df=phenodata[,c(4,3)]
+metabc1.df=rownames_to_column(metabc1.df, var="GSM_id")
+metabc1.df=cbind(metabc1.df,phenodata.df)
+metabc1.df=metabc1.df%>%relocate(Batch)
+#metabc1.df=column_to_rownames(metabc1.df,var="GSM_id")
+rownames(metabc1.df) = NULL
+#metabc1.df <- metabc1.df %>%
+
+metabc1.df <- metabc1.df[,-6720]
+
+# List of dataset names
+dataset_names <- c("GSE18312", "GSE38481", "GSE38484", 
+                   "GSE48072", "GSE54913", "GSE27383", "Kum")
+
+# Initialize an empty list to store results
+DGE_results <- list()
+
+# Loop through each dataset
+for (dataset in dataset_names) {
+  # Subset data
+  DS <- metabc1.df %>%
+    filter(Batch == dataset) %>%
+    column_to_rownames(var = "GSM_id")
+  
+  DS <- as.data.frame(t(DS[, -1]))  # Transpose and convert to data frame
+  
+  PD <- phenodata %>%
+    filter(Batch == dataset)
+  
+  f.source <- factor(PD$Diagnosis, levels = c("Control", "Schizophrenia"))
+  
+  # Check if both levels exist to prevent errors
+  if (length(unique(f.source)) < 2) {
+    warning(paste("Skipping dataset", dataset, "due to missing group levels"))
+    next
+  }
+  
+  design_metafile <- model.matrix(~0 + f.source)
+  colnames(design_metafile) <- c("Control", "Schizophrenia")
+  
+ DS[] <- lapply(DS, function(x) as.numeric(as.character(x)))
+  
+  fit <- lmFit(DS, design_metafile)
+  contrast.matrix <- makeContrasts(Schizophrenia - Control, levels = design_metafile)
+  fit2 <- contrasts.fit(fit, contrast.matrix)
+  fit2 <- eBayes(fit2)
+  
+  # Store results in the list with dataset name as key
+  DGE_results[[dataset]] <- topTable(fit2, number = Inf, adjust.method = "BH", confint = 0.95)
+}
+
+# Access results
+datasets <- c("GSE18312", "GSE38481", "GSE38484", "GSE48072", "GSE54913", "GSE27383", "Kum")
+
+# Assign each dataset from DGE_results
+for (dataset in datasets) {
+  new_name <- gsub("GSE", "", dataset)  # Remove "GSE" from the name
+  assign(paste0("DGE", new_name), DGE_results[[dataset]])
+}
+
+
+#either one of these
+
+  #name first coloumns of all datasets as genes
+  
+DGE18312 <- rownames_to_column(DGE18312, var="Genes")
+DGE38481 <- rownames_to_column(DGE38481, var="Genes")
+DGE38484 <- rownames_to_column(DGE38484, var="Genes")
+DGE48072 <- rownames_to_column(DGE48072, var="Genes")
+DGE54913 <- rownames_to_column(DGE54913, var="Genes")
+DGE27383 <- rownames_to_column(DGE27383, var="Genes")
+DGEKum <- rownames_to_column(DGEKum, var="Genes")
+  #merge datasets based on common genes
+  list_DGE = list(
+    DGE18312 = DGE18312, 
+    DGE38481 = DGE38481, 
+    DGE38484 = DGE38484, 
+    DGE48072 = DGE48072, 
+    DGE54913 = DGE54913,
+    DGE27383 = DGE27383,
+    DGEKum = DGEKum)  
+saveRDS(list_DGE, file = "list_DGE.rds")  
+  
+  
+merged_deg<-list_DGE %>% purrr::reduce(inner_join,by='Genes')
+dim(merged_deg) ###till here it works###
+
+# -----------------------------
+# 1. Combine DEG tables
+# -----------------------------
+meta_input <- bind_rows(
+  lapply(names(list_DGE), function(ds) {
+    df <- list_DGE[[ds]]
+    df$Dataset <- ds
+    df
+  })
+)
+
+# -----------------------------
+# 2. Compute variance from CI
+# vi = ((upper - lower) / (2*1.96))^2
+# -----------------------------
+meta_input <- meta_input %>%
+  mutate(
+    vi = ((CI.R - CI.L) / (2 * 1.96))^2
+  )
+
+meta_results <- meta_input %>%
+  group_by(Genes) %>%
+  group_modify(~ {
+    
+    # Use data.frame() instead of NULL to skip groups
+    if (nrow(.x) < 2) return(data.frame())
+    
+    fit <- tryCatch({
+      rma(yi = .x$logFC, vi = .x$vi, method = "REML")
+    }, error = function(e) return(NULL)) # Keep NULL here for the internal check
+    
+    # If the model failed, return an empty data frame to the group_modify
+    if (is.null(fit)) return(data.frame())
+    
+    data.frame(
+      meta_logFC = as.numeric(fit$b),
+      CI.L = fit$ci.lb,
+      CI.R = fit$ci.ub,
+      pval = fit$pval,
+      QE = fit$QE,
+      I2 = fit$I2,
+      T2 = fit$tau2
+    )
+  }) %>%
+  ungroup()
+
+
+
+# -----------------------------
+# 4. Multiple testing correction
+# -----------------------------
+meta_results$FDR <- p.adjust(meta_results$pval, method = "BH")
+
+# -----------------------------
+# 5. Save meta-analysis results
+# -----------------------------
+write.csv(meta_results,
+          "meta_analysis_metafor_results.csv",
+          row.names = FALSE)
+
+# =====================================================
+# 6. Forest plot for a single gene
+# =====================================================
+gene_name <- "S100A9"
+
+gene_data <- meta_input %>% filter(Genes == gene_name)
+
+fit_gene <- rma(
+  yi = gene_data$logFC,
+  vi = gene_data$vi,
+  slab = gene_data$Dataset,
+  method = "REML"
+)
+
+# =====================================================
+# 1. Forest plot with Heterogeneity Stats
+# =====================================================
+forest(
+  fit_gene,
+  slab = gene_data$Dataset,
+  xlab = "Log Fold Change",
+  main = paste("Forest plot for", gene_name)
+)
+
+# Extract statistics and format them
+# round() is used for readability
+stats_text <- paste0(
+  "Heterogeneity: I^2 = ", round(fit_gene$I2, 2), "%, ",
+  "Q = ", round(fit_gene$QE, 2), ", ",
+  "p = ", format.pval(fit_gene$QEp, digits = 3)
+)
+
+# Add the text to the bottom left of the plot
+# 'side=1' puts it in the margin, 'line=2' adjusts distance from axis
+mtext(stats_text, side = 1, line = 4, adj = 0, cex = 0.8, font = 3)
+
+# =====================================================
+# 2. Funnel plot with dataset names
+# =====================================================
+funnel(
+  fit_gene,
+  xlab = "Log Fold Change",
+  ylab = "Standard Error",
+  main = paste("Funnel plot for", gene_name)
+)
+
+# Add dataset labels next to the points
+text(
+  x = fit_gene$yi,
+  y = sqrt(fit_gene$vi),
+  labels = gene_data$Dataset,
+  pos = 4,
+  cex = 0.8
+)
+
+# -----------------------------
+# 1. Combine DEG tables
+# -----------------------------
+meta_input <- bind_rows(
+  lapply(names(list_DGE), function(ds) {
+    df <- list_DGE[[ds]]
+    df$Dataset <- ds
+    df
+  })
+)
+
+# -----------------------------
+# 2. Compute variance from CI
+# -----------------------------
+meta_input <- meta_input %>%
+  mutate(
+    vi = ((CI.R - CI.L) / (2 * 1.96))^2
+  )
+
+# -----------------------------
+# 3. Meta-analysis for ALL genes (no plots)
+# -----------------------------
+meta_results <- meta_input %>%
+  group_by(Genes) %>%
+  group_modify(~ {
+    
+    # Require at least 2 datasets
+    if (nrow(.x) < 2) return(data.frame())
+    
+    fit <- tryCatch(
+      rma(yi = .x$logFC,
+          vi = .x$vi,
+          method = "REML"),
+      error = function(e) NULL
+    )
+    
+    if (is.null(fit)) return(data.frame())
+    
+    data.frame(
+      meta_logFC = as.numeric(fit$b),
+      CI.L = fit$ci.lb,
+      CI.R = fit$ci.ub,
+      pval = fit$pval,
+      Q = fit$QE,
+      Q_pval = fit$QEp,
+      I2 = fit$I2,
+      n_studies = fit$k
+    )
+  }) %>%
+  ungroup()
+
+# -----------------------------
+# 4. Multiple testing correction
+# -----------------------------
+meta_results$FDR <- p.adjust(meta_results$pval, method = "BH")
+
+# -----------------------------
+# 5. Save results
+# -----------------------------
+write.csv(
+  meta_results,
+  "meta_analysis_metafor_all_genes.csv",
+  row.names = FALSE
+)
+
+# ---------------------------------------------
+# Isolate heterogeneously expressed genes
+# (run AFTER meta_results has been created)
+# ---------------------------------------------
+
+# Select genes with significant heterogeneity
+heterogeneous_genes <- meta_results %>%
+  filter(
+    Q_pval < 0.1,   # significant Cochran's Q test
+    I2 > 40         # I-squared greater than 40%
+  )
+
+# Optional: check how many genes were selected
+dim(heterogeneous_genes)
+
+# Save heterogeneous genes to CSV
+write.csv(
+  heterogeneous_genes,
+  "heterogeneous_genes.csv",
+  row.names = FALSE
+)
+
+# Install if not already installed
+if (!requireNamespace("openxlsx", quietly = TRUE)) {
+  install.packages("openxlsx")
+}
+
+# Define homogeneous genes
+# Criteria: non-significant heterogeneity + low I2
+homogeneous_genes <- meta_results %>%
+  filter(Q_pval >= 0.1, I2 <= 40)
+
+# Optional: sort by significance
+homogeneous_genes <- homogeneous_genes %>%
+  arrange(FDR)
+
+# Save to Excel
+write.xlsx(homogeneous_genes,
+           file = "Homogeneous_Genes.xlsx",
+           rowNames = FALSE)
+
+# Print summary
+cat("Number of homogeneous genes:", nrow(homogeneous_genes), "\n")
+
+
+
+classify_gene <- function(df) {
+  
+  if(nrow(df) < 2) return(data.frame())
+  
+  model <- tryCatch(
+    rma(yi = df$logFC, vi = df$vi, method = "REML"),
+    error = function(e) return(NULL)
+  )
+  
+  if(is.null(model)) return(data.frame())
+  
+  res <- rstandard(model)$z
+  
+  df$status <- ifelse(abs(res) > 2,
+                      "Heterogeneous",
+                      "Homogeneous")
+  
+  df
+}
+
+classified_data <- meta_input %>%
+  group_by(Genes) %>%
+  group_modify(~ classify_gene(.x)) %>%
+  ungroup()
+
+# Apply to every gene
+classified_data <- meta_input %>%
+  group_by(Genes) %>%
+  group_modify(~ classify_gene(.x))
+
+# Convert to Gene × Dataset table
+gene_dataset_table <- classified_data %>%
+  dplyr::select(Genes, Dataset, status) %>%
+  tidyr::pivot_wider(names_from = Dataset, values_from = status)
+
+# View result
+View(gene_dataset_table)
+
+# Save result
+write.csv(gene_dataset_table,
+          "gene_dataset_heterogeneity_by_funnel.csv",
+          row.names = FALSE)
 
