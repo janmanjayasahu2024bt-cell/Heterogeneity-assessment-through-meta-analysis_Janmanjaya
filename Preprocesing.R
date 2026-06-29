@@ -252,11 +252,6 @@ colnames(GSE38481.RAW)
 
 #/ PERFORMING BACKGROUND CORRECTION
 
-#BCOR.GSE38481<- lumiExpresso(GSE38481.RAW, bg.correct = TRUE,
-#                            variance.stabilize = FALSE,
-#                           normalize =TRUE,
-#                          verbose = TRUE)
-
 BCOR.GSE38481 <- lumiN(lumiT(lumiB(
   GSE38481.RAW,method="bgAdjust"),method="log2"),method="quantile")
 
@@ -360,9 +355,6 @@ colnames(GSE38484.RAW)= phData_38484$Geo_accession
 colnames(GSE38484.RAW)
 
 #/ PERFORMING BACKGROUND CORRECTION
-
-#BCOR.GSE38484<- lumiB(GSE38484.RAW, method = 'bgAdjust')
-
 
 BCOR.GSE38484 <- lumiN(lumiT(lumiB(
   GSE38484.RAW,method="bgAdjust"),method="log2"),method="quantile")
