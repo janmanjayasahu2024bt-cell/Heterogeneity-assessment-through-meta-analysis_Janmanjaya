@@ -10,6 +10,7 @@ library(metafor)
 library(tidyr)
 library(dplyr)
 library(openxlsx)
+library(rio)
 
 
 
@@ -234,7 +235,7 @@ saveRDS(list_DGE, file = "list_DGE.rds")
   
   
 merged_deg<-list_DGE %>% purrr::reduce(inner_join,by='Genes')
-dim(merged_deg) ###till here it works###
+dim(merged_deg) 
 
 # -----------------------------
 # 1. Combine DEG tables
@@ -505,3 +506,172 @@ write.csv(gene_dataset_table,
           "gene_dataset_heterogeneity_by_funnel.csv",
           row.names = FALSE)
 
+
+# -----------------------------
+# Load metadata
+# -----------------------------
+Metadata <- import("BH_and_q.xlsx")
+
+# -----------------------------
+# Load datasets
+# -----------------------------
+X18312 <- as.data.frame(readRDS("18312_normalized.rds"))
+X38481 <- as.data.frame(readRDS("38481_normalized"))
+X38484 <- as.data.frame(readRDS("38484_normalized.rds"))
+X48072 <- as.data.frame(readRDS("48072_normalized.rds"))
+X54913 <- as.data.frame(readRDS("54913_normalized.rds"))
+XKum   <- as.data.frame(readRDS("Kum_normalized.rds"))
+X27383 <- as.data.frame(readRDS("27383_normalized"))
+
+# -----------------------------
+# Add gene symbol column
+# -----------------------------
+X18312 <- rownames_to_column(X18312, var = "gene.symbol")
+X27383 <- rownames_to_column(X27383, var = "gene.symbol")
+X38481 <- rownames_to_column(X38481, var = "gene.symbol")
+X38484 <- rownames_to_column(X38484, var = "gene.symbol")
+X48072 <- rownames_to_column(X48072, var = "gene.symbol")
+X54913 <- rownames_to_column(X54913, var = "gene.symbol")
+XKum   <- rownames_to_column(XKum, var = "gene.symbol")
+
+# -----------------------------
+# Filter heterogeneous genes
+# -----------------------------
+hetero_genes <- Metadata %>%
+  filter(`BF_correction` == "sig") %>%
+  pull(Genes)
+
+# -----------------------------
+# Subset datasets
+# -----------------------------
+FiltDS18312 <- X18312 %>% filter(gene.symbol %in% hetero_genes)
+FiltDS27383 <- X27383 %>% filter(gene.symbol %in% hetero_genes)
+FiltDS38481 <- X38481 %>% filter(gene.symbol %in% hetero_genes)
+FiltDS38484 <- X38484 %>% filter(gene.symbol %in% hetero_genes)
+FiltDS48072 <- X48072 %>% filter(gene.symbol %in% hetero_genes)
+FiltDS54913 <- X54913 %>% filter(gene.symbol %in% hetero_genes)
+FiltDSKum   <- XKum   %>% filter(gene.symbol %in% hetero_genes)
+
+# -----------------------------
+# Eigengene calculation
+# -----------------------------
+arith_mean <- function(df) {
+  df <- df[, -which(colnames(df) == "gene.symbol")]
+  df <- apply(df, 2, as.numeric)
+  colMeans(df, na.rm = TRUE)
+}
+
+Eig18312 <- arith_mean(FiltDS18312)
+Eig27383 <- arith_mean(FiltDS27383)
+Eig38481 <- arith_mean(FiltDS38481)
+Eig38484 <- arith_mean(FiltDS38484)
+Eig48072 <- arith_mean(FiltDS48072)
+Eig54913 <- arith_mean(FiltDS54913)
+EigKum   <- arith_mean(FiltDSKum)
+
+# -----------------------------
+# Load phenotype data
+# -----------------------------
+PD18312 <- read.csv("18312_Ph_data.csv")
+PD27383 <- read.csv("27383_Ph_Data.csv")
+PD38481 <- read.csv("38481_Ph_data.csv")
+PD38484 <- read.csv("38484_Phenodata.csv")
+PD48072 <- read.csv("48072_Phenodata.csv")
+PD54913 <- read.csv("54913_Ph_data.csv")
+PDKum   <- read.csv("Kum_pd.csv")
+
+# -----------------------------
+# Function to compute effect size + variance
+# -----------------------------
+compute_effect <- function(eig, group) {
+  
+  group <- as.factor(group)
+  
+  case <- eig[group %in% c("Schizophrenia", "SCZ")]
+  control <- eig[group %in% c("Control", "CNT")]
+  
+  m1 <- mean(case, na.rm = TRUE)
+  m0 <- mean(control, na.rm = TRUE)
+  
+  v1 <- var(case, na.rm = TRUE)
+  v0 <- var(control, na.rm = TRUE)
+  
+  n1 <- length(case)
+  n0 <- length(control)
+  
+  # Effect size (mean difference)
+  yi <- m1 - m0
+  
+  # Variance of mean difference
+  vi <- (v1/n1) + (v0/n0)
+  
+  return(c(yi = yi, vi = vi))
+}
+
+# -----------------------------
+# Compute effects for each dataset
+# -----------------------------
+res18312 <- compute_effect(Eig18312, PD18312$Diagnosis)
+res27383 <- compute_effect(Eig27383, PD27383$Disease.state)
+res38481 <- compute_effect(Eig38481, PD38481$Diagnosis)
+res38484 <- compute_effect(Eig38484, PD38484$Case)
+res48072 <- compute_effect(Eig48072, PD48072$Case)
+res54913 <- compute_effect(Eig54913, PD54913$Pheno_data)
+resKum   <- compute_effect(EigKum,   PDKum$Diagnosis)
+
+# -----------------------------
+# Combine for meta-analysis
+# -----------------------------
+DatasetsComb <- data.frame(
+  Dataset = c("X18312","X27383","X38481","X38484","X48072","X54913","XKum"),
+  yi = c(res18312["yi"], res27383["yi"], res38481["yi"],
+         res38484["yi"], res48072["yi"], res54913["yi"], resKum["yi"]),
+  vi = c(res18312["vi"], res27383["vi"], res38481["vi"],
+         res38484["vi"], res48072["vi"], res54913["vi"], resKum["vi"])
+)
+
+# -----------------------------
+# Meta-analysis
+# -----------------------------
+DatasetsCombrma <- rma(
+  yi, vi,
+  data = DatasetsComb,
+  method = "REML",
+  slab = DatasetsComb$Dataset
+)
+
+# -----------------------------
+# Funnel plot
+# -----------------------------
+funnel.rma(DatasetsCombrma, label = FALSE, main = "BF_correction")
+
+text(
+  x = DatasetsCombrma$yi,
+  y = sqrt(DatasetsCombrma$vi),
+  labels = DatasetsCombrma$slab,
+  pos = 4,
+  cex = 0.8
+)
+
+# -----------------------------
+# Forest plot
+# -----------------------------
+par(mar = c(4, 4, 6, 2))  # increase top margin
+
+
+forest.rma(DatasetsCombrma)
+
+title(
+  bquote(
+    atop(
+      "BF_correction",
+      paste(
+        "Q = ", .(round(DatasetsCombrma$QE,2)),
+        ", p = ", .(round(DatasetsCombrma$QEp,3)),
+        ", I^2 = ", .(round(DatasetsCombrma$I2,1)), "%",
+        ", tau^2 = ", .(round(DatasetsCombrma$tau2,3))
+      )
+    )
+  ),
+  cex.main = 1.1  # slightly smaller text
+)
