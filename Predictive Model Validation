@@ -1,0 +1,438 @@
+setwd(".....")
+
+# =========================================================
+# LOAD LIBRARIES
+# =========================================================
+
+library(limma)
+library(sva)
+library(caret)
+library(e1071)
+library(pROC)
+library(dplyr)
+library(org.Hs.eg.db)
+library(AnnotationDbi)
+
+# =========================================================
+# LOAD DATASETS
+# =========================================================
+
+cat("\nLoading datasets...\n")
+
+ds1 <- readRDS("38481_normalized.rds")
+ds2 <- readRDS("38484_normalized.rds")
+ds3 <- readRDS("54913_normalized.rds")
+
+test_homo <- readRDS("Kum_normalized.rds") 
+test_hetero <- readRDS("18312_normalized.rds") 
+
+# =========================================================
+# CONVERT TO STRICTLY NUMERIC MATRICES
+# =========================================================
+
+cat("\nConverting datasets to numeric matrices...\n")
+
+convert_to_numeric_matrix <- function(ds) {
+  original_colnames <- colnames(ds)
+  original_rownames <- rownames(ds)
+  ds <- as.data.frame(ds, check.names = FALSE)
+  ds[] <- lapply(ds, function(x) as.numeric(as.character(x)))
+  ds <- as.matrix(ds)
+  mode(ds) <- "numeric"
+  colnames(ds) <- original_colnames
+  rownames(ds) <- original_rownames
+  return(ds)
+}
+
+ds1 <- convert_to_numeric_matrix(ds1)
+ds2 <- convert_to_numeric_matrix(ds2)
+ds3 <- convert_to_numeric_matrix(ds3)
+test_homo <- convert_to_numeric_matrix(test_homo)
+test_hetero <- convert_to_numeric_matrix(test_hetero)
+
+# =========================================================
+# QC — BOXPLOTS (RAW/NORMALIZED SCALE SCALE BEFORE PIPELINE)
+# =========================================================
+
+cat("\nGenerating expression scale boxplots...\n")
+
+par(mfrow = c(2,3))
+boxplot(ds1, outline = FALSE, las = 2, main = "DS1", col = "lightblue")
+boxplot(ds2, outline = FALSE, las = 2, main = "DS2", col = "lightblue")
+boxplot(ds3, outline = FALSE, las = 2, main = "DS3", col = "lightblue")
+boxplot(test_homo, outline = FALSE, las = 2, main = "Test Homo", col = "coral")
+boxplot(test_hetero, outline = FALSE, las = 2, main = "Test Hetero", col = "coral")
+par(mfrow = c(1,1))
+
+# =========================================================
+# GENE SYMBOL STANDARDIZATION
+# =========================================================
+
+standardize_gene_symbols <- function(ds) {
+  cat("\nStandardizing gene annotations...\n")
+  current_ids <- rownames(ds)
+  
+  mapped_symbols <- mapIds(
+    org.Hs.eg.db,
+    keys = current_ids,
+    column = "SYMBOL",
+    keytype = "SYMBOL",
+    multiVals = "first"
+  )
+  
+  keep <- !is.na(mapped_symbols)
+  ds_clean <- ds[keep, , drop = FALSE]
+  rownames(ds_clean) <- mapped_symbols[keep]
+  
+  duplicate_counts <- table(rownames(ds_clean))
+  ds_sum <- rowsum(ds_clean, group = rownames(ds_clean))
+  ds_final <- ds_sum / as.numeric(duplicate_counts[rownames(ds_sum)])
+  
+  return(as.matrix(ds_final))
+}
+
+ds1 <- standardize_gene_symbols(ds1)
+ds2 <- standardize_gene_symbols(ds2)
+ds3 <- standardize_gene_symbols(ds3)
+test_homo <- standardize_gene_symbols(test_homo)
+test_hetero <- standardize_gene_symbols(test_hetero)
+
+# =========================================================
+# RETAIN COMMON TRAIN GENES & MERGE
+# =========================================================
+
+cat("\nFinding common training genes...\n")
+common_genes <- Reduce(intersect, list(rownames(ds1), rownames(ds2), rownames(ds3)))
+cat("\nNumber of common genes:", length(common_genes), "\n")
+
+ds1 <- ds1[common_genes, , drop = FALSE]
+ds2 <- ds2[common_genes, , drop = FALSE]
+ds3 <- ds3[common_genes, , drop = FALSE]
+
+cat("\nMerging training datasets...\n")
+train_merged <- cbind(ds1, ds2, ds3)
+
+# =========================================================
+# INVERSE LOG2 TRANSFORMATION ON TRAIN
+# =========================================================
+
+cat("\nApplying Inverse Log2 transformation (2^x) to Training data...\n")
+train_merged <- 2^train_merged
+
+# =========================================================
+# LOAD AND ALIGN METADATA
+# =========================================================
+
+cat("\nLoading metadata...\n")
+pheno <- read.csv("merged_pheno_data.csv", stringsAsFactors = FALSE)
+
+pheno_train <- pheno[match(colnames(train_merged), pheno$GSM_ID), ]
+alignment_check <- all(colnames(train_merged) == pheno_train$GSM_ID)
+if(!alignment_check) stop("Metadata mismatch detected!")
+
+group <- factor(pheno_train$Diagnosis)
+batch <- factor(pheno_train$GSE_ID)
+
+# =========================================================
+# PCA BEFORE COMBAT (TRAIN DISPERSION QC)
+# =========================================================
+
+cat("\nGenerating PCA BEFORE ComBat...\n")
+pca_before <- prcomp(t(train_merged), scale. = TRUE)
+plot(pca_before$x[,1], pca_before$x[,2], col = batch, pch = 19, xlab = "PC1", ylab = "PC2", main = "TRAIN PCA BEFORE ComBat")
+legend("topright", legend = levels(batch), col = 1:length(levels(batch)), pch = 19)
+
+# =========================================================
+# COMBAT CORRECTION - TRAIN DATA ONLY
+# =========================================================
+
+cat("\nRunning ComBat on Training Data...\n")
+modcombat <- model.matrix(~ group)
+combat_train <- ComBat(
+  dat = as.matrix(train_merged),
+  batch = batch,
+  mod = modcombat,
+  par.prior = TRUE,
+  prior.plots = FALSE
+)
+
+# =========================================================
+# PCA AFTER COMBAT (TRAIN HOMOGENIZATION QC)
+# =========================================================
+
+cat("\nGenerating PCA AFTER ComBat...\n")
+pca_after <- prcomp(t(combat_train), scale. = TRUE)
+plot(pca_after$x[,1], pca_after$x[,2], col = batch, pch = 19, xlab = "PC1", ylab = "PC2", main = "TRAIN PCA AFTER ComBat")
+legend("topright", legend = levels(batch), col = 1:length(levels(batch)), pch = 19)
+
+# =========================================================
+# LIMMA FEATURE RANKING & BUILD TRAINING MATRIX
+# =========================================================
+
+cat("\nRunning Limma feature ranking...\n")
+design <- model.matrix(~ group)
+fit <- lmFit(combat_train, design)
+fit <- eBayes(fit)
+deg_table <- topTable(fit, coef = 2, number = Inf, adjust.method = "BH")
+
+selected_genes <- rownames(combat_train)
+
+train_matrix <- t(combat_train[selected_genes, , drop = FALSE])
+non_zero_var <- apply(train_matrix, 2, sd) != 0
+train_matrix <- train_matrix[, non_zero_var, drop = FALSE]
+selected_genes <- colnames(train_matrix)
+
+train_df <- data.frame(Diagnosis = group, train_matrix)
+
+# =========================================================
+# TRAIN SVM MODEL (GROUND TRUTH)
+# =========================================================
+
+cat("\nTraining SVM model on Ground Truth Train...\n")
+set.seed(123)
+svm_model <- svm(
+  Diagnosis ~ .,
+  data = train_df,
+  kernel = "linear",
+  probability = TRUE
+)
+cat("SVM training complete.\n")
+
+# =========================================================
+# FUNCTION: MOLD TEST DATA TO TRAIN & GENERATE PCA QC
+# =========================================================
+
+align_test_combat <- function(test_data, train_reference, selected_genes, dataset_name = "TEST") {
+  
+  cat("\n====================================\n")
+  cat("Aligning & Molding:", dataset_name, "via ComBat ref.batch\n")
+  cat("====================================\n")
+  
+  test_data <- 2^test_data
+  
+  test_data <- test_data[rownames(test_data) %in% selected_genes, , drop = FALSE]
+  
+  missing_genes <- setdiff(selected_genes, rownames(test_data))
+  
+  if(length(missing_genes) > 0) {
+    
+    imputed_values <- apply(
+      train_reference[missing_genes, , drop = FALSE],
+      1,
+      median,
+      na.rm = TRUE
+    )
+    
+    missing_matrix <- matrix(
+      rep(imputed_values, ncol(test_data)),
+      nrow = length(missing_genes),
+      dimnames = list(
+        missing_genes,
+        colnames(test_data)
+      )
+    )
+    
+    test_data <- rbind(test_data, missing_matrix)
+  }
+  
+  test_data <- test_data[selected_genes, , drop = FALSE]
+  
+  combined_dat <- cbind(
+    train_reference[selected_genes, , drop = FALSE],
+    test_data
+  )
+  
+  batch_vec <- c(
+    rep("Train_Anchor", ncol(train_reference)),
+    rep("Incoming_Test", ncol(test_data))
+  )
+  
+  # =====================================================
+  # PCA BEFORE COMBAT
+  # =====================================================
+  
+  pca_test_before <- prcomp(
+    t(combined_dat),
+    scale. = TRUE
+  )
+  
+  plot(
+    pca_test_before$x[,1],
+    pca_test_before$x[,2],
+    col = factor(batch_vec),
+    pch = c(19,17)[factor(batch_vec)],
+    xlab = "PC1",
+    ylab = "PC2",
+    cex = 1.2,
+    main = paste(dataset_name, "PCA BEFORE Ref-ComBat")
+  )
+  
+  # =====================================================
+  # RUN COMBAT
+  # =====================================================
+  
+  cat("Running ComBat (ref.batch = Train_Anchor)...\n")
+  
+  combat_res <- ComBat(
+    dat = combined_dat,
+    batch = factor(batch_vec),
+    ref.batch = "Train_Anchor",
+    par.prior = TRUE
+  )
+  
+  # =====================================================
+  # PCA AFTER COMBAT
+  # =====================================================
+  
+  pca_test_after <- prcomp(
+    t(combat_res),
+    scale. = TRUE
+  )
+  
+  plot(
+    pca_test_after$x[,1],
+    pca_test_after$x[,2],
+    col = factor(batch_vec),
+    pch = c(19,17)[factor(batch_vec)],
+    xlab = "PC1",
+    ylab = "PC2",
+    cex = 1.2,
+    main = paste(dataset_name, "PCA AFTER Ref-ComBat")
+  )
+  
+  # =====================================================
+  # RETURN TEST DATA ONLY
+  # =====================================================
+  
+  test_molded <- combat_res[
+    ,
+    (ncol(train_reference) + 1):ncol(combined_dat)
+  ]
+  
+  df_molded <- as.data.frame(t(test_molded))
+  
+  colnames(df_molded) <- make.names(colnames(df_molded))
+  
+  return(df_molded)
+}
+
+# =========================================================
+# 4 PCA PLOTS + SHARED LEGEND
+# =========================================================
+
+layout(matrix(
+  c(
+    1, 2,
+    3, 4
+  ),
+  nrow = 2,
+  byrow = TRUE
+))
+
+par(mar = c(2,4,2,1))
+
+# =========================================================
+# TEST SET 1
+# =========================================================
+
+test_homo_df <- align_test_combat(
+  test_data = test_homo,
+  train_reference = combat_train,
+  selected_genes = selected_genes,
+  dataset_name = "Test 1 (Kum)"
+)
+
+# =========================================================
+# TEST SET 2
+# =========================================================
+
+test_hetero_df <- align_test_combat(
+  test_data = test_hetero,
+  train_reference = combat_train,
+  selected_genes = selected_genes,
+  dataset_name = "Test 2 (18312)"
+)
+
+# =========================================================
+# SHARED LEGEND PANEL
+# =========================================================
+
+par(mar = c(0,0,0,0))
+
+plot.new()
+
+legend(
+  "center",
+  legend = c(
+    "Train Anchor",
+    "Incoming Test"
+  ),
+  col = c(1,2),
+  pch = c(19,17),
+  horiz = TRUE,
+  bty = "n",
+  cex = 1.2
+)
+
+# =========================================================
+# RESET GRAPHICS
+# =========================================================
+
+layout(1)
+par(mfrow = c(1,1))
+
+# =========================================================
+# PREDICT WITH PROBABILITY RETRIEVAL
+# =========================================================
+
+cat("\nPredicting on Test 1 (Kum)...\n")
+pred_homo <- predict(svm_model, newdata = test_homo_df, probability = TRUE)
+# Dynamically extract the second class level column to avoid hardcoding typos
+target_class <- levels(train_df$Diagnosis)[2] 
+prob_homo <- attr(pred_homo, "probabilities")[, target_class]
+
+cat("\nPredicting on Test 2 (18312)...\n")
+pred_hetero <- predict(svm_model, newdata = test_hetero_df, probability = TRUE)
+prob_hetero <- attr(pred_hetero, "probabilities")[, target_class]
+# =========================================================
+# PERFORMANCE, EVALUATION, AND ROC CURVES
+# =========================================================
+
+pheno$GSM_ID <- trimws(toupper(pheno$GSM_ID))
+colnames(test_homo) <- trimws(toupper(colnames(test_homo)))
+colnames(test_hetero) <- trimws(toupper(colnames(test_hetero)))
+
+homo_pheno <- pheno[match(colnames(test_homo), pheno$GSM_ID), ]
+hetero_pheno <- pheno[match(colnames(test_hetero), pheno$GSM_ID), ]
+
+true_labels_homo <- factor(homo_pheno$Diagnosis, levels = levels(train_df$Diagnosis))
+true_labels_hetero <- factor(hetero_pheno$Diagnosis, levels = levels(train_df$Diagnosis))
+
+cat("\n--- Kum Performance ---\n")
+print(confusionMatrix(pred_homo, true_labels_homo))
+
+cat("\n--- 18312 Performance ---\n")
+print(confusionMatrix(pred_hetero, true_labels_hetero))
+
+# =========================================================
+# PLOT AUC / ROC CURVES
+# =========================================================
+
+cat("\nGenerating AUC/ROC Curves...\n")
+
+roc_homo <- roc(true_labels_homo, prob_homo, levels = levels(train_df$Diagnosis))
+roc_hetero <- roc(true_labels_hetero, prob_hetero, levels = levels(train_df$Diagnosis))
+
+plot(roc_homo, col = "blue", lwd = 3, main = "ROC Performance Comparison")
+plot(roc_hetero, col = "red", lwd = 3, add = TRUE)
+legend("bottomright", 
+       legend = c(paste("Test 1 (Kum) AUC:", round(auc(roc_homo), 3)),
+                  paste("Test 2 (18312) AUC:", round(auc(roc_hetero), 3))),
+       col = c("blue", "red"), lwd = 3)
+
+# =========================================================
+# END PIPELINE
+# =========================================================
+cat("\n====================================\n")
+cat("PIPELINE COMPLETED SUCCESSFULLY\n")
+cat("====================================\n")
