@@ -11,4 +11,7 @@ DGEA and Meta-analysis: DGEA and Meta-analysis of the results was performed.
 Gene filtering: Genes were selected based on a certain criteria.
 Pseudogene synthesis: The selected genes were used to synthesize pseudogenes.
 Meta-analysis: Pseudogene was used to assess dataset level heterogeneity.
-Contact: Vipul : janmanjaya.sahu2024bt@ssbs.edu.in
+
+Verification of Heterogeneity: Predictive model was used to validate the findings.
+
+Contact: janmanjaya.sahu2024bt@ssbs.edu.in
